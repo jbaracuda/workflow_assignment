@@ -4,92 +4,86 @@ import requests
 st.set_page_config(page_title="Movie Workflow", layout="centered")
 
 # ======================================================
-# SAFE HUGGINGFACE CALL (Mistral — always available)
+# LLaMA via OpenRouter (FREE)
 # ======================================================
-def hf_generate(prompt, max_tokens=200):
-    url = "https://router.huggingface.co/inference"
+def llama_generate(prompt, max_tokens=200):
+    url = "https://openrouter.ai/api/v1/chat/completions"
 
     headers = {
-        "Authorization": f"Bearer {st.secrets['HF_API_KEY']}",
+        "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
         "Content-Type": "application/json"
     }
 
     payload = {
-        "model": "mistralai/Mistral-7B-Instruct-v0.2",
-        "input": prompt,
-        "parameters": {
-            "max_new_tokens": max_tokens,
-            "temperature": 0.7
-        }
+        "model": "meta-llama/llama-3-8b-instruct",
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "max_tokens": max_tokens
     }
 
-    response = requests.post(url, headers=headers, json=payload)
-
-    if response.status_code == 503:
-        return "Model loading — please try again."
+    response = requests.post(url, json=payload, headers=headers)
 
     if not response.ok:
-        st.error(f"HuggingFace Error {response.status_code}: {response.text}")
+        st.error(f"OpenRouter Error {response.status_code}: {response.text}")
         st.stop()
 
     try:
         data = response.json()
-        generated = data["results"][0]["generated_text"]
-        return generated
+        return data["choices"][0]["message"]["content"]
     except Exception as e:
-        st.error(f"Parsing error: {e}")
+        st.error("Error reading response from OpenRouter.")
         st.write(data)
         st.stop()
 
 
 # ======================================================
-# OMDb API (Free)
+# OMDb API (Free movie Metadata)
 # ======================================================
 def get_movie_data(title):
     url = f"http://www.omdbapi.com/?t={title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
     return requests.get(url).json()
 
+
 # ======================================================
 # UI
 # ======================================================
-st.title("🎬 Movie Workflow Demo — 4 AI Agents")
-st.write("All free using HuggingFace + OMDb.")
+st.title("🎬 Movie Workflow — 4 Agent AI System")
+st.write("Uses **LLaMA-3** via OpenRouter (free) + OMDb for movie data.")
 
-movie_title = st.text_input("What is your favorite movie?")
+movie_title = st.text_input("What is your favorite movie? 🎥")
 
 if st.button("Run Workflow") and movie_title.strip():
 
-    if "HF_API_KEY" not in st.secrets:
-        st.error("Missing HuggingFace API key in secrets.")
-        st.stop()
-
-    if "OMDB_API_KEY" not in st.secrets:
-        st.error("Missing OMDb API key in secrets.")
-        st.stop()
-
     # --------------------------------------------------
-    # AGENT A — Normalize Title
+    # AGENT A — Normalize Movie Title
     # --------------------------------------------------
-    st.write("### 🧩 Agent A — Normalize Title")
-    normalized = hf_generate(
-        f"Return only the correctly formatted movie title for: {movie_title}",
+    st.markdown("## 🧩 Agent A — Normalize Title")
+
+    normalized = llama_generate(
+        f"Return ONLY the properly capitalized official movie title for: {movie_title}",
         max_tokens=30
     ).strip()
-    st.write(f"**Normalized Title:** {normalized}")
+
+    st.success(f"Normalized Title: **{normalized}**")
 
     # --------------------------------------------------
-    # AGENT B — Metadata + Poster
+    # AGENT B — Search OMDb for Metadata + Poster
     # --------------------------------------------------
-    st.write("### 🎞️ Agent B — Fetching Metadata")
+    st.markdown("## 🎞️ Agent B — Movie Metadata")
+
     info = get_movie_data(normalized)
 
     if info.get("Response") == "False":
-        st.error("Movie not found.")
+        st.error("Movie not found in OMDb.")
         st.stop()
 
+    # Poster
     if info.get("Poster") and info["Poster"] != "N/A":
         st.image(info["Poster"], width=300)
 
+    # Metadata
+    st.subheader("Movie Details")
     st.json({
         "Title": info.get("Title"),
         "Year": info.get("Year"),
@@ -100,24 +94,42 @@ if st.button("Run Workflow") and movie_title.strip():
     })
 
     # --------------------------------------------------
-    # AGENT C — Synopsis
+    # AGENT C — Create Full Movie Synopsis
     # --------------------------------------------------
-    st.write("### 📖 Agent C — AI Synopsis")
-    synopsis = hf_generate(
-        f"Write a detailed synopsis of the movie '{normalized}'.",
+    st.markdown("## 📖 Agent C — AI Synopsis")
+
+    synopsis = llama_generate(
+        f"Write a detailed, spoiler-free synopsis for the movie '{normalized}'.",
         max_tokens=250
     )
+
     st.write(synopsis)
 
     # --------------------------------------------------
-    # AGENT D — Quiz
+    # AGENT D — Create Quiz About the Movie
     # --------------------------------------------------
-    st.write("### 📝 Agent D — Quiz Generator")
-    quiz = hf_generate(
-        f"Create 5 multiple-choice questions about the movie '{normalized}'. "
-        f"Use this synopsis:\n{synopsis}",
-        max_tokens=300
+    st.markdown("## 📝 Agent D — Quiz Generator")
+
+    quiz = llama_generate(
+        f"""
+        Create a set of **5 multiple-choice questions** about the movie '{normalized}'.
+        Use this synopsis for context:
+        {synopsis}
+        Format each question like:
+
+        Q1: ...
+        A) ...
+        B) ...
+        C) ...
+        D) ...
+        Answer: X
+        """,
+        max_tokens=350
     )
+
     st.write(quiz)
 
-    st.success("🎉 Workflow complete!")
+    # --------------------------------------------------
+    # Workflow Complete
+    # --------------------------------------------------
+    st.success("🎉 Workflow complete! Enjoy your quiz.")
