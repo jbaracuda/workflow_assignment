@@ -7,7 +7,6 @@ import random
 # ---------------------------------------------------------
 st.set_page_config(page_title="Movie Study Guide Generator", layout="wide")
 
-# Fade-in animation and nicer layout
 st.markdown("""
 <style>
     .fade-in {
@@ -37,29 +36,32 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------
-# HUGGINGFACE API HELPER
+# OPENROUTER API CALL
 # ---------------------------------------------------------
-HF_API_KEY = st.secrets["HF_TOKEN"]
-HF_URL = "https://router.huggingface.co/v1/chat/completions"
+OPENROUTER_KEY = st.secrets["OPENROUTER_API_KEY"]
 
-def ask_huggingface(prompt):
-    """Send prompt to llama model on HF Router."""
+def ask_openrouter(prompt):
+    """
+    Sends prompt to OpenRouter using a LLaMA model.
+    """
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_KEY}",
+        "Content-Type": "application/json"
+    }
     payload = {
-        "model": "meta-llama/Llama-3.1-8b-instruct",
+        "model": "meta-llama/llama-3.1-70b-instruct",  
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 400
     }
-    headers = {
-        "Authorization": f"Bearer {HF_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    response = requests.post(HF_URL, headers=headers, json=payload)
+
+    response = requests.post(url, headers=headers, json=payload)
     response.raise_for_status()
     return response.json()["choices"][0]["message"]["content"]
 
 
 # ---------------------------------------------------------
-# OMDb API (Movie Data)
+# OMDb API (Movie Database)
 # ---------------------------------------------------------
 OMDB_KEY = st.secrets["OMDB_KEY"]
 
@@ -72,110 +74,105 @@ def fetch_movie_data(title):
 
 
 # ---------------------------------------------------------
-# UI — Title
+# UI Header
 # ---------------------------------------------------------
 st.markdown('<div class="title fade-in">🎬 Movie Study Guide Workflow</div>', unsafe_allow_html=True)
 st.markdown('<div class="subtitle fade-in">Enter a movie and generate a study guide, metadata, and a quiz.</div>', unsafe_allow_html=True)
 
-movie = st.text_input("🎥 What is your favorite movie?", "")
+movie = st.text_input("🎥 What is your favorite movie?")
 
+# ---------------------------------------------------------
+# RUN WORKFLOW
+# ---------------------------------------------------------
 if movie.strip():
-    # ---------------------------------------------------------
-    # AGENT A — Normalize Title
-    # ---------------------------------------------------------
-    with st.container():
-        st.markdown("### 🟥 Agent A — Normalize Title")
-        try:
-            normalized_title = ask_huggingface(
-                f"Normalize this movie title to its official capitalization: {movie}"
-            )
-        except:
-            normalized_title = movie
 
-        st.markdown(f"""
-        <div class="agent-box fade-in">
+    # -----------------------------------------
+    # Agent A — Normalize Title
+    # -----------------------------------------
+    st.markdown("### 🟥 Agent A — Normalize Title")
+
+    try:
+        normalized_title = ask_openrouter(
+            f"Normalize this movie title to its official capitalization: {movie}"
+        )
+    except:
+        normalized_title = movie
+
+    st.markdown(f"""
+    <div class="agent-box fade-in">
         <b>Normalized Title:</b> {normalized_title}
-        </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
 
-    # ---------------------------------------------------------
-    # AGENT B — Metadata Paragraph (AI rewritten)
-    # ---------------------------------------------------------
-    with st.container():
-        st.markdown("### 🟧 Agent B — Movie Metadata")
+    # -----------------------------------------
+    # Agent B — AI-Rewritten Metadata
+    # -----------------------------------------
+    st.markdown("### 🟧 Agent B — Movie Metadata")
 
-        movie_data = fetch_movie_data(normalized_title)
+    movie_data = fetch_movie_data(normalized_title)
 
-        if movie_data:
-            # Show poster if available
-            poster_url = movie_data.get("Poster", "")
-            col1, col2 = st.columns([1, 2])
+    if movie_data:
+        poster_url = movie_data.get("Poster", "")
 
-            with col1:
-                if poster_url and poster_url != "N/A":
-                    st.image(poster_url, width=280)
+        col1, col2 = st.columns([1, 2])
 
-            # Create an AI-styled metadata paragraph
-            meta_text = ask_huggingface(
-                f"Rewrite the following movie info as a single smooth descriptive paragraph "
-                f"that feels like high-quality study guide material:\n\n{movie_data}"
-            )
+        with col1:
+            if poster_url != "N/A" and poster_url:
+                st.image(poster_url, width=280)
 
-            with col2:
-                st.markdown(f"""
-                <div class="agent-box fade-in">
-                {meta_text}
-                </div>
-                """, unsafe_allow_html=True)
-
-        else:
-            st.error("Movie not found in OMDb. Check your OMDb key or the movie title.")
-
-
-    # ---------------------------------------------------------
-    # AGENT C — Study Guide Summary
-    # ---------------------------------------------------------
-    with st.container():
-        st.markdown("### 🟨 Agent C — Study Guide Summary")
-
-        summary = ask_huggingface(
-            f"Create a study-friendly summary of the movie '{normalized_title}' "
-            f"based on typical themes, plot points, director style, and cultural impact. "
-            f"Write as if preparing material for a film class."
+        # Rewrite metadata into a smooth paragraph
+        meta_paragraph = ask_openrouter(
+            f"Rewrite the following movie information as one smooth, educational paragraph "
+            f"suitable for a study guide.\n\n{movie_data}"
         )
 
-        st.markdown(f"""
-        <div class="agent-box fade-in">
-        {summary}
-        </div>
-        """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div class="agent-box fade-in">{meta_paragraph}</div>
+            """, unsafe_allow_html=True)
 
+    else:
+        st.error("Movie not found in OMDb. Check your movie title or OMDb key.")
 
-    # ---------------------------------------------------------
-    # AGENT D — Quiz Generator (linked to summary)
-    # ---------------------------------------------------------
+    # -----------------------------------------
+    # Agent C — Study Guide Summary
+    # -----------------------------------------
+    st.markdown("### 🟨 Agent C — Study Guide Summary")
+
+    summary = ask_openrouter(
+        f"Write a study-friendly summary explaining the key plot, themes, stylistic elements, "
+        f"and cultural significance of the movie '{normalized_title}'. "
+        f"Write it like material for a film analysis class."
+    )
+
+    st.markdown(f"""
+    <div class="agent-box fade-in">{summary}</div>
+    """, unsafe_allow_html=True)
+
+    # -----------------------------------------
+    # Agent D — Quiz (using summary)
+    # -----------------------------------------
     st.markdown("### 🟩 Agent D — Quiz")
 
     # Generate quiz from the summary
-    quiz_data = ask_huggingface(
-        f"Based ONLY on the following text, generate a 5-question multiple choice quiz. "
+    quiz = ask_openrouter(
+        f"Using ONLY this study guide text, generate a 5-question multiple choice quiz. "
         f"Each question must include:\n"
         f"- The question\n"
-        f"- 4 answer options (A, B, C, D)\n"
+        f"- Four answer choices labeled A, B, C, D\n"
         f"- The correct answer letter\n"
         f"- A one-sentence explanation\n\n"
         f"TEXT:\n{summary}"
     )
 
-    # Store quiz persistently
+    # Persist quiz so UI doesn't reset
     if "quiz" not in st.session_state:
-        st.session_state.quiz = quiz_data
+        st.session_state.quiz = quiz
 
     st.markdown(f"""
-    <div class="agent-box fade-in">
-    {st.session_state.quiz}
-    </div>
-    """)
+    <div class="agent-box fade-in">{st.session_state.quiz}</div>
+    """, unsafe_allow_html=True)
 
-    st.info("✨ The quiz stays on screen without resetting other agents.")
+    st.success("✨ Agents will stay visible when selecting answers.")
+
 
