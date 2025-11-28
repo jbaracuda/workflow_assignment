@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import re
 
 st.set_page_config(page_title="Movie Workflow", layout="centered")
 
@@ -31,24 +32,36 @@ def llama_generate(prompt, max_tokens=250):
 
 
 # ======================================================
-# OMDb Metadata
+# CLEAN OMDb Metadata Lookup (never fails)
 # ======================================================
-def get_movie_data(title):
-    url = f"http://www.omdbapi.com/?t={title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
-    return requests.get(url).json()
+def get_movie_data(ai_title):
+    clean_title = re.sub(r"[^A-Za-z0-9 :\-']", "", ai_title).strip()
+
+    # Try exact match
+    url_exact = f"http://www.omdbapi.com/?t={clean_title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
+    exact = requests.get(url_exact).json()
+
+    if exact.get("Response") == "True":
+        return exact
+
+    # Try search mode
+    url_search = f"http://www.omdbapi.com/?s={clean_title}&apikey={st.secrets['OMDB_API_KEY']}"
+    search = requests.get(url_search).json()
+
+    if search.get("Response") == "True":
+        real_title = search["Search"][0]["Title"]
+        url_final = f"http://www.omdbapi.com/?t={real_title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
+        return requests.get(url_final).json()
+
+    return {"Response": "False"}
 
 
 # ======================================================
-# QUIZ UTILITIES (Agent D)
+# QUIZ PARSER
 # ======================================================
 def parse_quiz(raw_text):
-    """
-    Converts the LLaMA quiz text into a structured format:
-    returns list of {question, options, correct, explanation}
-    """
     quiz = []
     blocks = raw_text.strip().split("\n\n")
-    current = {}
 
     for block in blocks:
         lines = block.strip().split("\n")
@@ -56,7 +69,7 @@ def parse_quiz(raw_text):
 
         for line in lines:
             if line.startswith("Q"):
-                q = line[line.index(":") + 1:].strip()
+                q = line.split(":", 1)[1].strip()
 
             elif line.startswith(("A)", "B)", "C)", "D)")):
                 opts.append(line.strip())
@@ -79,61 +92,66 @@ def parse_quiz(raw_text):
 
 
 # ======================================================
-# UI
+# Initialize session state
+# ======================================================
+for key in [
+    "normalized_title", "metadata_paragraph", "metadata_poster",
+    "synopsis", "quiz_data", "user_answers", "show_results"
+]:
+    if key not in st.session_state:
+        st.session_state[key] = None if key != "user_answers" else {}
+        if key == "show_results":
+            st.session_state[key] = False
+
+
+# ======================================================
+# UI HEADER
 # ======================================================
 st.title("🎬 Movie Workflow — Four-Agent System")
 
 movie_title = st.text_input("What is your favorite movie?")
 
-if "quiz_data" not in st.session_state:
-    st.session_state.quiz_data = None
-if "user_answers" not in st.session_state:
-    st.session_state.user_answers = {}
-if "show_results" not in st.session_state:
-    st.session_state.show_results = False
 
-
+# ======================================================
+# RUN WORKFLOW
+# ======================================================
 if st.button("Run Workflow") and movie_title.strip():
 
     # --------------------------------------------------
     # AGENT A — Normalize Title
     # --------------------------------------------------
-    st.header("Agent A — Title Normalization")
-
     normalized = llama_generate(
         f"Return only the correctly formatted official movie title: {movie_title}",
-        max_tokens=25
+        max_tokens=20
     ).strip()
 
-    st.success(f"Title: **{normalized}**")
+    st.session_state.normalized_title = normalized
 
     # --------------------------------------------------
-    # AGENT B — Paragraph Summary of Metadata (High-Level, No Spoilers)
+    # AGENT B — Background Paragraph (general, 1 paragraph)
     # --------------------------------------------------
-    st.header("Agent B — Movie Background")
-    
     raw_info = get_movie_data(normalized)
-    
+
     if raw_info.get("Response") == "False":
         st.error("Movie not found in OMDb.")
         st.stop()
-    
-    # Show poster
-    if raw_info.get("Poster") and raw_info["Poster"] != "N/A":
-        st.image(raw_info["Poster"], width=300)
-    
-    # High-level, non-spoiler background paragraph
+
+    st.session_state.metadata_poster = raw_info.get("Poster", None)
+
     metadata_prompt = f"""
-    Write a single-paragraph, high-level background overview of the movie '{normalized}'.
-    
-    REQUIREMENTS:
-    - DO NOT reveal major plot points, twists, or endings.
-    - DO NOT describe specific character arcs or detailed motivations.
-    - Focus only on broad themes, tone, and general premise.
-    - Include director, genre, year, and why the film is notable.
-    - Do not mention AI or generation.
-    
-    Here is the metadata for reference:
+    Write ONE paragraph giving general background about the movie '{normalized}'.
+    Include:
+    - its overall premise,
+    - director,
+    - genre,
+    - year,
+    - primary cast,
+    - cultural or cinematic significance.
+
+    MUST NOT include detailed plot points or character breakdowns.
+    MUST NOT mention AI or generation.
+
+    Data:
     Title: {raw_info.get("Title")}
     Year: {raw_info.get("Year")}
     Genre: {raw_info.get("Genre")}
@@ -141,42 +159,29 @@ if st.button("Run Workflow") and movie_title.strip():
     Actors: {raw_info.get("Actors")}
     Plot: {raw_info.get("Plot")}
     """
-    
-    metadata_paragraph = llama_generate(metadata_prompt, max_tokens=200)
-    st.write(metadata_paragraph)
-    
-    
-    
+
+    st.session_state.metadata_paragraph = llama_generate(metadata_prompt, max_tokens=220)
+
     # --------------------------------------------------
-    # AGENT C — Two-Paragraph Character-Focused Synopsis
+    # AGENT C — Character-Focused Synopsis (2 paragraphs)
     # --------------------------------------------------
-    st.header("Agent C — Synopsis")
-    
     synopsis_prompt = f"""
-    Write a two-paragraph character-focused synopsis of the movie '{normalized}'.
-    
-    REQUIREMENTS:
-    - DO NOT repeat the high-level plot summary style used in Agent B.
-    - Paragraph 1 should describe the central characters, their personalities,
-      their roles, and what motivates them—without giving away major plot twists.
-    - Paragraph 2 should explain how these characters interact, conflict, or develop
-      within the story’s setting, again without spoilers.
-    - Avoid summarizing the entire plot; focus on character dynamics and structure.
-    - Do not mention AI or generation.
+    Write TWO paragraphs discussing the movie '{normalized}'.
+    Paragraph 1: summarize the story setup and world without spoilers.
+    Paragraph 2: focus specifically on key characters, their roles,
+    motivations, and relationships.
+
+    Must NOT mention AI or generation.
     """
-    
-    synopsis = llama_generate(synopsis_prompt, max_tokens=350)
-    st.write(synopsis)
 
+    st.session_state.synopsis = llama_generate(synopsis_prompt, max_tokens=350)
 
     # --------------------------------------------------
-    # AGENT D — Quiz
+    # AGENT D — Quiz Based ONLY on Agent C
     # --------------------------------------------------
-    st.header("Agent D — Quiz")
-
     quiz_prompt = f"""
-    Using the synopsis below, create a 5-question multiple-choice quiz.
-    Each question MUST follow this format:
+    Create a 5-question multiple-choice quiz based STRICTLY on the text below.
+    Use EXACT format:
 
     Q1: <question>
     A) <option>
@@ -184,37 +189,50 @@ if st.button("Run Workflow") and movie_title.strip():
     C) <option>
     D) <option>
     Answer: <letter>
-    Explanation: <why this answer is correct>
+    Explanation: <explain why>
 
-    REQUIREMENTS:
-    - Base every question strictly on the synopsis.
-    - Do not mention AI or generation.
-    - Provide useful explanations.
-
-    SYNOPSIS:
-    {synopsis}
+    TEXT:
+    {st.session_state.synopsis}
     """
 
     raw_quiz = llama_generate(quiz_prompt, max_tokens=350)
-    quiz = parse_quiz(raw_quiz)
-
-    st.session_state.quiz_data = quiz
+    st.session_state.quiz_data = parse_quiz(raw_quiz)
     st.session_state.user_answers = {}
     st.session_state.show_results = False
 
 
 # ======================================================
-# SHOW QUIZ (IF AVAILABLE)
+# SHOW AGENTS A–C IF AVAILABLE
+# ======================================================
+if st.session_state.normalized_title:
+    st.header("Agent A — Title Normalization")
+    st.success(f"Title: **{st.session_state.normalized_title}**")
+
+if st.session_state.metadata_paragraph:
+    st.header("Agent B — Movie Background")
+
+    if st.session_state.metadata_poster and st.session_state.metadata_poster != "N/A":
+        st.image(st.session_state.metadata_poster, width=300)
+
+    st.write(st.session_state.metadata_paragraph)
+
+if st.session_state.synopsis:
+    st.header("Agent C — Synopsis")
+    st.write(st.session_state.synopsis)
+
+
+# ======================================================
+# AGENT D — QUIZ
 # ======================================================
 if st.session_state.quiz_data and not st.session_state.show_results:
-    st.subheader("Your Quiz")
+
+    st.header("Agent D — Quiz")
 
     for i, q in enumerate(st.session_state.quiz_data):
         st.write(f"**Q{i+1}: {q['question']}**")
 
-        # Radio buttons with persistent state
         st.session_state.user_answers[i] = st.radio(
-            f"Choose an answer for question {i+1}:",
+            f"Your answer for question {i+1}:",
             q["options"],
             key=f"q{i}"
         )
@@ -235,17 +253,17 @@ if st.session_state.show_results:
     quiz = st.session_state.quiz_data
 
     for i, q in enumerate(quiz):
-        user_choice = st.session_state.user_answers.get(i, "")
+        user_ans = st.session_state.user_answers.get(i, "")
         correct_letter = q["correct"]
-        correct_option = [o for o in q["options"] if o.startswith(correct_letter)][0]
+        correct_opt = [o for o in q["options"] if o.startswith(correct_letter)][0]
 
-        if user_choice.startswith(correct_letter):
+        if user_ans.startswith(correct_letter):
             score += 1
-            st.success(f"Q{i+1}: Correct! 🎉")
+            st.success(f"Q{i+1}: Correct!")
         else:
             st.error(f"Q{i+1}: Incorrect.")
 
-        st.write(f"**Correct Answer:** {correct_option}")
+        st.write(f"**Correct Answer:** {correct_opt}")
         st.write(f"**Explanation:** {q['explanation']}")
         st.write("---")
 
