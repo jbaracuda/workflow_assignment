@@ -102,31 +102,71 @@ if st.button("Run Workflow") and movie_title.strip():
 
     st.write(synopsis)
 
+   # --------------------------------------------------
+    # AGENT D — Interactive Quiz
     # --------------------------------------------------
-    # AGENT D — Create Quiz About the Movie
-    # --------------------------------------------------
-    st.markdown("## 📝 Agent D — Quiz Generator")
-
-    quiz = llama_generate(
+    st.markdown("## 📝 Agent D — Interactive Quiz Generator")
+    
+    quiz_json = llama_generate(
         f"""
-        Create a set of **5 multiple-choice questions** about the movie '{normalized}'.
-        Use this synopsis for context:
+        Create **5 multiple-choice questions** about the movie '{normalized}'.
+        Use this synopsis:
         {synopsis}
-        Format each question like:
-
-        Q1: ...
-        A) ...
-        B) ...
-        C) ...
-        D) ...
-        Answer: X
+    
+        RETURN THE RESULT IN THIS EXACT JSON FORMAT — NO EXTRA TEXT:
+    
+        {{
+            "questions": [
+                {{
+                    "question": "text",
+                    "choices": ["A text", "B text", "C text", "D text"],
+                    "answer": "A",
+                    "explanation": "Explain why this is correct"
+                }}
+            ]
+        }}
         """,
-        max_tokens=350
+        max_tokens=450
     )
-
-    st.write(quiz)
-
-    # --------------------------------------------------
-    # Workflow Complete
-    # --------------------------------------------------
-    st.success("🎉 Workflow complete! Enjoy your quiz.")
+    
+    import json
+    
+    try:
+        quiz_data = json.loads(quiz_json)
+        questions = quiz_data["questions"]
+    except:
+        st.error("AI returned invalid quiz JSON. Here is the raw output:")
+        st.write(quiz_json)
+        st.stop()
+    
+    # Store user answers
+    user_answers = {}
+    
+    st.write("### 🎯 Answer the questions below:")
+    
+    for i, q in enumerate(questions):
+        st.write(f"#### Q{i+1}: {q['question']}")
+        user_answers[i] = st.radio(
+            f"Your answer for Q{i+1}",
+            options=["A", "B", "C", "D"],
+            key=f"q{i}"
+        )
+    
+    if st.button("Submit Quiz"):
+        st.markdown("## 📊 Results")
+        correct = 0
+    
+        for i, q in enumerate(questions):
+            user = user_answers[i]
+            correct_answer = q["answer"]
+    
+            if user == correct_answer:
+                st.success(f"Q{i+1}: Correct! 🎉 ({correct_answer})")
+                correct += 1
+            else:
+                st.error(f"Q{i+1}: Incorrect. You chose {user}, correct is {correct_answer}")
+    
+            st.write(f"💡 **Explanation:** {q['explanation']}")
+            st.write("---")
+    
+        st.markdown(f"### 🏁 Final Score: **{correct} / {len(questions)}**")
