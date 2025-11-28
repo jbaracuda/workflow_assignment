@@ -115,7 +115,7 @@ if st.button("Run Workflow") and movie_title.strip():
 
     # -------------------------
     # AGENT A — Normalize Title
-    -------------------------
+    #-------------------------
     normalized = llama_generate(
         f"Return only the correctly formatted official movie title: {movie_title}",
         max_tokens=20,
