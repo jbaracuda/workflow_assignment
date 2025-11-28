@@ -7,10 +7,7 @@ st.set_page_config(page_title="Movie Workflow", layout="centered")
 # SAFE HUGGINGFACE CALL (Mistral — always available)
 # ======================================================
 def hf_generate(prompt, max_tokens=200):
-    model = "mistralai/Mistral-7B-Instruct-v0.2"
-
-    # NEW ENDPOINT — FIXED
-    url = f"https://router.huggingface.co/v1/inference/{model}"
+    url = "https://router.huggingface.co/inference"
 
     headers = {
         "Authorization": f"Bearer {st.secrets['HF_API_KEY']}",
@@ -18,7 +15,8 @@ def hf_generate(prompt, max_tokens=200):
     }
 
     payload = {
-        "inputs": prompt,
+        "model": "mistralai/Mistral-7B-Instruct-v0.2",
+        "input": prompt,
         "parameters": {
             "max_new_tokens": max_tokens,
             "temperature": 0.7
@@ -27,25 +25,22 @@ def hf_generate(prompt, max_tokens=200):
 
     response = requests.post(url, headers=headers, json=payload)
 
-    # Handle model loading state
     if response.status_code == 503:
-        return "⚠️ Model is loading. Please click the button again."
+        return "Model loading — please try again."
 
-    # Handle other errors
     if not response.ok:
         st.error(f"HuggingFace Error {response.status_code}: {response.text}")
         st.stop()
 
     try:
         data = response.json()
-        # New HF returns "generated_text" under choices
-        if "generated_text" in data[0]:
-            return data[0]["generated_text"]
-        if "choices" in data:
-            return data["choices"][0]["text"]
-        return str(data)
-    except:
-        return str(data)
+        generated = data["results"][0]["generated_text"]
+        return generated
+    except Exception as e:
+        st.error(f"Parsing error: {e}")
+        st.write(data)
+        st.stop()
+
 
 # ======================================================
 # OMDb API (Free)
