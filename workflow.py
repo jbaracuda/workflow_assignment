@@ -8,7 +8,9 @@ st.set_page_config(page_title="Movie Workflow", layout="centered")
 # ======================================================
 def hf_generate(prompt, max_tokens=200):
     model = "mistralai/Mistral-7B-Instruct-v0.2"
-    url = f"https://api-inference.huggingface.co/models/{model}"
+
+    # NEW ENDPOINT — FIXED
+    url = f"https://router.huggingface.co/v1/inference/{model}"
 
     headers = {
         "Authorization": f"Bearer {st.secrets['HF_API_KEY']}",
@@ -29,14 +31,19 @@ def hf_generate(prompt, max_tokens=200):
     if response.status_code == 503:
         return "⚠️ Model is loading. Please click the button again."
 
-    # Handle any other error
+    # Handle other errors
     if not response.ok:
         st.error(f"HuggingFace Error {response.status_code}: {response.text}")
         st.stop()
 
     try:
         data = response.json()
-        return data[0]["generated_text"]
+        # New HF returns "generated_text" under choices
+        if "generated_text" in data[0]:
+            return data[0]["generated_text"]
+        if "choices" in data:
+            return data["choices"][0]["text"]
+        return str(data)
     except:
         return str(data)
 
