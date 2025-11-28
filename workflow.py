@@ -1,78 +1,90 @@
 import streamlit as st
 import requests
 
-# PAGE SETUP
 st.set_page_config(page_title="Movie Workflow", layout="centered")
 
 # ======================================================
-# HUGGINGFACE INFERENCE API CALL (FREE)
+# SAFE HUGGINGFACE CALL (Mistral — always available)
 # ======================================================
-def hf_generate(prompt, model="tiiuae/falcon-7b-instruct", max_tokens=200):
-    """
-    Sends a text-generation request to HuggingFace API.
-    You only need to supply HF_API_KEY in st.secrets.
-    """
-    headers = {"Authorization": f"Bearer {st.secrets['HF_API_KEY']}"}
-    payload = {
-        "inputs": prompt,
-        "parameters": {"max_new_tokens": max_tokens}
-    }
+def hf_generate(prompt, max_tokens=200):
+    model = "mistralai/Mistral-7B-Instruct-v0.2"
     url = f"https://api-inference.huggingface.co/models/{model}"
 
-    r = requests.post(url, json=payload, headers=headers)
-    r.raise_for_status()
-    data = r.json()
+    headers = {
+        "Authorization": f"Bearer {st.secrets['HF_API_KEY']}",
+        "Content-Type": "application/json"
+    }
 
-    # HF sometimes returns a list with generated_text
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": max_tokens,
+            "temperature": 0.7
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+
+    # Handle model loading state
+    if response.status_code == 503:
+        return "⚠️ Model is loading. Please click the button again."
+
+    # Handle any other error
+    if not response.ok:
+        st.error(f"HuggingFace Error {response.status_code}: {response.text}")
+        st.stop()
+
     try:
+        data = response.json()
         return data[0]["generated_text"]
     except:
         return str(data)
 
 # ======================================================
-# OMDb API CALL (FREE)
+# OMDb API (Free)
 # ======================================================
 def get_movie_data(title):
-    """
-    Returns data from OMDb.
-    You only need to put OMDB_API_KEY into st.secrets.
-    """
-    key = st.secrets["OMDB_API_KEY"]
-    url = f"http://www.omdbapi.com/?t={title}&apikey={key}&plot=full"
-    r = requests.get(url)
-    return r.json()
+    url = f"http://www.omdbapi.com/?t={title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
+    return requests.get(url).json()
 
 # ======================================================
-# STREAMLIT UI
+# UI
 # ======================================================
-st.title("🎬 Movie AI Workflow Demo")
-st.write("A 4-Agent AI workflow using HuggingFace + OMDb (all free).")
+st.title("🎬 Movie Workflow Demo — 4 AI Agents")
+st.write("All free using HuggingFace + OMDb.")
 
 movie_title = st.text_input("What is your favorite movie?")
 
 if st.button("Run Workflow") and movie_title.strip():
 
+    if "HF_API_KEY" not in st.secrets:
+        st.error("Missing HuggingFace API key in secrets.")
+        st.stop()
+
+    if "OMDB_API_KEY" not in st.secrets:
+        st.error("Missing OMDb API key in secrets.")
+        st.stop()
+
     # --------------------------------------------------
     # AGENT A — Normalize Title
     # --------------------------------------------------
-    st.write("### 🧩 Agent A — Normalizing Movie Title")
+    st.write("### 🧩 Agent A — Normalize Title")
     normalized = hf_generate(
-        f"Return only the properly capitalized movie title of: {movie_title}",
-        max_tokens=20
+        f"Return only the correctly formatted movie title for: {movie_title}",
+        max_tokens=30
     ).strip()
-    st.write(f"Normalized Title: **{normalized}**")
+    st.write(f"**Normalized Title:** {normalized}")
 
     # --------------------------------------------------
-    # AGENT B — OMDb Info + Poster
+    # AGENT B — Metadata + Poster
     # --------------------------------------------------
-    st.write("### 🎞️ Agent B — Fetching Movie Metadata")
+    st.write("### 🎞️ Agent B — Fetching Metadata")
     info = get_movie_data(normalized)
 
     if info.get("Response") == "False":
-        st.error("Movie not found. Try another movie name.")
+        st.error("Movie not found.")
         st.stop()
 
-    # Poster
     if info.get("Poster") and info["Poster"] != "N/A":
         st.image(info["Poster"], width=300)
 
@@ -86,23 +98,24 @@ if st.button("Run Workflow") and movie_title.strip():
     })
 
     # --------------------------------------------------
-    # AGENT C — Generate AI Synopsis
+    # AGENT C — Synopsis
     # --------------------------------------------------
-    st.write("### 📖 Agent C — AI-Generated Synopsis")
+    st.write("### 📖 Agent C — AI Synopsis")
     synopsis = hf_generate(
-        f"Write a detailed movie synopsis for the film '{normalized}'.",
+        f"Write a detailed synopsis of the movie '{normalized}'.",
         max_tokens=250
     )
     st.write(synopsis)
 
     # --------------------------------------------------
-    # AGENT D — Generate Quiz Questions
+    # AGENT D — Quiz
     # --------------------------------------------------
     st.write("### 📝 Agent D — Quiz Generator")
     quiz = hf_generate(
-        f"Create 5 multiple-choice quiz questions based on this synopsis:\n{synopsis}",
+        f"Create 5 multiple-choice questions about the movie '{normalized}'. "
+        f"Use this synopsis:\n{synopsis}",
         max_tokens=300
     )
     st.write(quiz)
 
-    st.success("Workflow complete! 🎉")
+    st.success("🎉 Workflow complete!")
