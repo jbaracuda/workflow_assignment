@@ -50,7 +50,7 @@ def ask_openrouter(prompt):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "meta-llama/llama-3.1-70b-instruct",  
+        "model": "meta-llama/llama-3.1-70b-instruct",
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": 400
     }
@@ -63,7 +63,7 @@ def ask_openrouter(prompt):
 # ---------------------------------------------------------
 # OMDb API (Movie Database)
 # ---------------------------------------------------------
-OMDB_KEY = st.secrets["OMDB_KEY"]
+OMDB_KEY = st.secrets["OMDB_API_KEY"]
 
 def fetch_movie_data(title):
     url = f"http://www.omdbapi.com/?t={title}&apikey={OMDB_KEY}"
@@ -123,7 +123,7 @@ if movie.strip():
         # Rewrite metadata into a smooth paragraph
         meta_paragraph = ask_openrouter(
             f"Rewrite the following movie information as one smooth, educational paragraph "
-            f"suitable for a study guide.\n\n{movie_data}"
+            f"suitable for a film study guide:\n\n{movie_data}"
         )
 
         with col2:
@@ -154,7 +154,6 @@ if movie.strip():
     # -----------------------------------------
     st.markdown("### 🟩 Agent D — Quiz")
 
-    # Generate quiz from the summary
     quiz = ask_openrouter(
         f"Using ONLY this study guide text, generate a 5-question multiple choice quiz. "
         f"Each question must include:\n"
@@ -165,7 +164,6 @@ if movie.strip():
         f"TEXT:\n{summary}"
     )
 
-    # Persist quiz so UI doesn't reset
     if "quiz" not in st.session_state:
         st.session_state.quiz = quiz
 
@@ -173,6 +171,4 @@ if movie.strip():
     <div class="agent-box fade-in">{st.session_state.quiz}</div>
     """, unsafe_allow_html=True)
 
-    st.success("✨ Agents will stay visible when selecting answers.")
-
-
+    st.success("✨ Agents remain visible when interacting with quiz options.")
