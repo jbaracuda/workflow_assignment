@@ -190,11 +190,15 @@ if st.button("Run 4-Agent Workflow") and movie_input.strip():
     # Agent D - Quiz: generate JSON, parse, show interactive quiz + grading + explanations
     st.header("📝 Agent D — Interactive Quiz (AI-generated)")
     quiz_prompt = (
-        "Create exactly 5 multiple-choice questions about the movie using the synopsis and metadata provided. "
-        "Return ONLY valid JSON exactly in this format with no extra text:\n"
-        '{ "questions": [ { "question": \"...\", "choices": [\"A...\",\"B...\",\"C...\",\"D...\"], "answer": "A", "explanation": "..." } ] }\n\n'
-        f"Synopsis:\n{synopsis}\n\nMetadata: {json.dumps(metadata_context)}"
+    "You are an instructor. Create exactly 5 multiple-choice questions "
+    "ONLY based on the information provided in the synopsis below. "
+    "If information is not in the synopsis, DO NOT invent new facts. "
+    "All questions and answers must be strictly derived from this synopsis.\n\n"
+    "Return ONLY valid JSON in this exact format:\n"
+    '{ "questions": [ { "question": "TEXT", "choices": ["A", "B", "C", "D"], "answer": "A", "explanation": "TEXT" } ] }\n\n'
+    f"Synopsis:\n{synopsis}"
     )
+
     raw_quiz = llama(quiz_prompt, max_tokens=500)
 
     # Extract JSON safely
