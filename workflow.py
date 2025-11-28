@@ -108,50 +108,66 @@ if st.button("Run Workflow") and movie_title.strip():
     st.success(f"Title: **{normalized}**")
 
     # --------------------------------------------------
-    # AGENT B — Paragraph Summary of Metadata
-    # --------------------------------------------------
-    st.header("Agent B — Movie Background")
+# AGENT B — Paragraph Summary of Metadata (High-Level, No Spoilers)
+# --------------------------------------------------
+st.header("Agent B — Movie Background")
 
-    raw_info = get_movie_data(normalized)
+raw_info = get_movie_data(normalized)
 
-    if raw_info.get("Response") == "False":
-        st.error("Movie not found in OMDb.")
-        st.stop()
+if raw_info.get("Response") == "False":
+    st.error("Movie not found in OMDb.")
+    st.stop()
 
-    # Show poster
-    if raw_info.get("Poster") and raw_info["Poster"] != "N/A":
-        st.image(raw_info["Poster"], width=300)
+# Show poster
+if raw_info.get("Poster") and raw_info["Poster"] != "N/A":
+    st.image(raw_info["Poster"], width=300)
 
-    # Turn metadata into a clean paragraph
-    metadata_prompt = f"""
-    Create a clean, informative paragraph summarizing important background details
-    about the movie '{normalized}'. Include the director, year, main cast, genre,
-    and overall significance. Do not mention AI or that this was generated.
-    
-    Data:
-    Title: {raw_info.get("Title")}
-    Year: {raw_info.get("Year")}
-    Genre: {raw_info.get("Genre")}
-    Director: {raw_info.get("Director")}
-    Actors: {raw_info.get("Actors")}
-    Plot: {raw_info.get("Plot")}
-    """
+# High-level, non-spoiler background paragraph
+metadata_prompt = f"""
+Write a single-paragraph, high-level background overview of the movie '{normalized}'.
 
-    metadata_paragraph = llama_generate(metadata_prompt, max_tokens=200)
-    st.write(metadata_paragraph)
+REQUIREMENTS:
+- DO NOT reveal major plot points, twists, or endings.
+- DO NOT describe specific character arcs or detailed motivations.
+- Focus only on broad themes, tone, and general premise.
+- Include director, genre, year, and why the film is notable.
+- Do not mention AI or generation.
 
-    # --------------------------------------------------
-    # AGENT C — Full Synopsis
-    # --------------------------------------------------
-    st.header("Agent C — Synopsis")
+Here is the metadata for reference:
+Title: {raw_info.get("Title")}
+Year: {raw_info.get("Year")}
+Genre: {raw_info.get("Genre")}
+Director: {raw_info.get("Director")}
+Actors: {raw_info.get("Actors")}
+Plot: {raw_info.get("Plot")}
+"""
 
-    synopsis = llama_generate(
-        f"Write a rich, detailed synopsis of the movie '{normalized}'. "
-        f"Do not include spoilers unless they are common knowledge.",
-        max_tokens=300
-    )
+metadata_paragraph = llama_generate(metadata_prompt, max_tokens=200)
+st.write(metadata_paragraph)
 
-    st.write(synopsis)
+
+
+# --------------------------------------------------
+# AGENT C — Two-Paragraph Character-Focused Synopsis
+# --------------------------------------------------
+st.header("Agent C — Synopsis")
+
+synopsis_prompt = f"""
+Write a two-paragraph character-focused synopsis of the movie '{normalized}'.
+
+REQUIREMENTS:
+- DO NOT repeat the high-level plot summary style used in Agent B.
+- Paragraph 1 should describe the central characters, their personalities,
+  their roles, and what motivates them—without giving away major plot twists.
+- Paragraph 2 should explain how these characters interact, conflict, or develop
+  within the story’s setting, again without spoilers.
+- Avoid summarizing the entire plot; focus on character dynamics and structure.
+- Do not mention AI or generation.
+"""
+
+synopsis = llama_generate(synopsis_prompt, max_tokens=350)
+st.write(synopsis)
+
 
     # --------------------------------------------------
     # AGENT D — Quiz
