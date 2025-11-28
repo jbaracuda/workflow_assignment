@@ -1,256 +1,181 @@
 import streamlit as st
 import requests
-import json
 
-st.set_page_config(page_title="Movie Workflow", layout="centered")
+st.set_page_config(page_title="Movie Study Guide Workflow", layout="centered")
 
-# =========================
-# Session State Setup
-# =========================
-for key in [
-    "normalized_title",
-    "metadata_paragraph",
-    "metadata_poster",
-    "synopsis",
-    "quiz_data",
-    "user_answers",
-    "show_results",
-]:
-    if key not in st.session_state:
-        st.session_state[key] = None
-
-
-# =========================
-# OpenRouter / LLaMA Generator
-# =========================
-def llama_generate(prompt, max_tokens=250):
+# ---------------------------------------------------------
+# OPENROUTER API CALL
+# ---------------------------------------------------------
+def ask_openrouter(prompt, max_tokens=400):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
-        "Content-Type": "application/json",
+        "Content-Type": "application/json"
     }
 
     payload = {
-        "model": "meta-llama/llama-3-8b-instruct",
+        "model": "meta-llama/llama-3.1-70b-instruct",
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": max_tokens,
+        "max_tokens": max_tokens
     }
 
     response = requests.post(url, json=payload, headers=headers)
-
     if not response.ok:
         st.error(f"OpenRouter Error {response.status_code}: {response.text}")
         st.stop()
 
-    data = response.json()
-    return data["choices"][0]["message"]["content"]
+    return response.json()["choices"][0]["message"]["content"]
 
 
-# =========================
-# OMDb Metadata Fetcher
-# =========================
-def get_movie_data(title):
+# ---------------------------------------------------------
+# OMDb API
+# ---------------------------------------------------------
+def fetch_movie_data(title):
     url = f"http://www.omdbapi.com/?t={title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
-    return requests.get(url).json()
+    data = requests.get(url).json()
+    if data.get("Response") == "False":
+        return None
+    return data
 
 
-# =========================
-# Quiz Parser
-# =========================
-def parse_quiz(text):
-    """
-    Expected Quiz Format:
-    Q1: ...
-    A) ...
-    B) ...
-    C) ...
-    D) ...
-    Answer: X
-    Explanation: ...
-    """
-    questions = []
-    blocks = text.split("Q")
-    for block in blocks[1:]:
-        lines = block.strip().split("\n")
-        question_line = lines[0][3:].strip()  # skip "1: "
-        choices = [l[3:].strip() for l in lines[1:5]]  # remove "A) "
-        answer_line = next(l for l in lines if l.startswith("Answer"))
-        explanation_line = next(l for l in lines if l.startswith("Explanation"))
+# ---------------------------------------------------------
+# UI HEADER
+# ---------------------------------------------------------
+st.title("🎬 Movie Study Guide Workflow")
+st.write("Enter a movie and generate a study guide, metadata, and a quiz.")
 
-        answer = answer_line.split(":")[1].strip()
-        explanation = explanation_line.split(":")[1].strip()
-
-        questions.append(
-            {
-                "question": question_line,
-                "choices": choices,
-                "answer": answer,
-                "explanation": explanation,
-            }
-        )
-    return questions
+movie = st.text_input("🎥 What is your favorite movie?")
 
 
-# ============================================================
-# UI Title
-# ============================================================
-st.title("🎬 Movie Workflow — 4-Agent AI System")
+# ---------------------------------------------------------
+# RUN WORKFLOW
+# ---------------------------------------------------------
+if movie.strip():
 
+    # -----------------------------------------
+    # Agent A — Normalize Title
+    # -----------------------------------------
+    st.header("🟥 Agent A — Normalize Title")
 
-# =========================
-# Input
-# =========================
-movie_title = st.text_input("What is your favorite movie?")
+    normalized_title = ask_openrouter(
+        f"Return the official, properly capitalized title for this movie: {movie}",
+        max_tokens=40
+    )
 
+    st.write(f"**Normalized Title:** {normalized_title}")
 
-# =========================
-# Run Workflow Button
-# =========================
-if st.button("Run Workflow") and movie_title.strip():
+    # -----------------------------------------
+    # Agent B — AI Movie Metadata Paragraph
+    # -----------------------------------------
+    st.header("🟧 Agent B — Movie Metadata")
 
-    # Reset quiz state
-    st.session_state.quiz_data = None
-    st.session_state.user_answers = {}
-    st.session_state.show_results = False
+    movie_data = fetch_movie_data(normalized_title)
 
-    # -------------------------
-    # AGENT A — Normalize Title
-    #-------------------------
-    normalized = llama_generate(
-        f"Return only the correctly formatted official movie title: {movie_title}",
-        max_tokens=20,
-    ).strip()
-
-    st.session_state.normalized_title = normalized
-
-    # -------------------------
-    # AGENT B — Movie Background
-    -------------------------
-    raw_info = get_movie_data(normalized)
-
-    if raw_info.get("Response") == "False":
-        st.error("Movie not found in OMDb.")
+    if not movie_data:
+        st.error("Movie not found in OMDb. Check your movie title or OMDb key.")
         st.stop()
 
-    st.session_state.metadata_poster = (
-        raw_info.get("Poster") if raw_info.get("Poster") != "N/A" else None
+    # Poster  
+    poster = movie_data.get("Poster", "")
+    if poster and poster != "N/A":
+        st.image(poster, width=300)
+
+    # Rewrite metadata nicely
+    metadata_text = ask_openrouter(
+        f"Rewrite the following movie metadata in one clean, descriptive paragraph:\n{movie_data}",
+        max_tokens=300
     )
 
-    metadata_prompt = f"""
-Write a polished paragraph describing key background details about the movie '{normalized}'.
-Include the release year, genre, director, major cast members, and general significance.
-Here is the data:
+    st.write(metadata_text)
 
-Title: {raw_info.get("Title")}
-Year: {raw_info.get("Year")}
-Genre: {raw_info.get("Genre")}
-Director: {raw_info.get("Director")}
-Actors: {raw_info.get("Actors")}
-Plot: {raw_info.get("Plot")}
-"""
+    # -----------------------------------------
+    # Agent C — Study Guide Summary
+    # -----------------------------------------
+    st.header("🟨 Agent C — Study Guide Summary")
 
-    st.session_state.metadata_paragraph = llama_generate(
-        metadata_prompt, max_tokens=180
+    summary = ask_openrouter(
+        f"Write a study guide summary for the movie '{normalized_title}'. "
+        f"Explain plot, themes, symbolism, tone, and film style.",
+        max_tokens=350
     )
 
-    # -------------------------
-    # AGENT C — Synopsis
-    -------------------------
-    st.session_state.synopsis = llama_generate(
-        f"Write a rich, detailed synopsis of the movie '{normalized}'.",
-        max_tokens=300,
+    st.write(summary)
+
+    # -----------------------------------------
+    # Agent D — Quiz
+    # -----------------------------------------
+    st.header("🟩 Agent D — Quiz")
+
+    quiz_json = ask_openrouter(
+        f"""
+        Create a multiple-choice quiz based ONLY on this study guide:
+
+        {summary}
+
+        Requirements:
+        - 5 questions
+        - Each question must have choices A, B, C, D
+        - Include the correct answer letter
+        - Include a one-sentence explanation
+        Return the result in JSON format:
+        {{
+            "questions": [
+                {{
+                    "question": "...",
+                    "choices": {{"A": "...", "B": "...", "C": "...", "D": "..."}},
+                    "answer": "A",
+                    "explanation": "..."
+                }}
+            ]
+        }}
+        """
     )
 
-    # -------------------------
-    # AGENT D — Quiz
-    -------------------------
-    quiz_prompt = f"""
-Using ONLY the synopsis below, create a 5-question multiple-choice quiz.
+    # Try reading JSON
+    import json
+    try:
+        quiz = json.loads(quiz_json)
+    except:
+        st.error("AI returned invalid quiz JSON. Showing raw output instead:")
+        st.write(quiz_json)
+        st.stop()
 
-Format EXACTLY like this:
+    # Store quiz for session
+    if "quiz_data" not in st.session_state:
+        st.session_state.quiz_data = quiz
+        st.session_state.quiz_answers = {}
 
-Q1: What is the question?
-A) Option A
-B) Option B
-C) Option C
-D) Option D
-Answer: A
-Explanation: Explanation text.
+    st.subheader("📘 Answer the Quiz")
 
-SYNOPSIS:
-{st.session_state.synopsis}
-"""
+    for idx, q in enumerate(st.session_state.quiz_data["questions"]):
+        question_key = f"question_{idx}"
 
-    raw_quiz = llama_generate(quiz_prompt, max_tokens=350)
-    st.session_state.quiz_data = parse_quiz(raw_quiz)
+        st.write(f"**Q{idx+1}. {q['question']}**")
 
-
-# ============================================================
-# ALWAYS SHOW AGENTS A–C IF AVAILABLE
-# ============================================================
-if st.session_state.normalized_title:
-    st.header("Agent A — Title Normalization")
-    st.success(st.session_state.normalized_title)
-
-if st.session_state.metadata_paragraph:
-    st.header("Agent B — Background")
-
-    if st.session_state.metadata_poster:
-        st.image(st.session_state.metadata_poster, width=300)
-
-    st.write(st.session_state.metadata_paragraph)
-
-if st.session_state.synopsis:
-    st.header("Agent C — Synopsis")
-    st.write(st.session_state.synopsis)
-
-
-# ============================================================
-# QUIZ (AGENT D)
-# ============================================================
-if st.session_state.quiz_data:
-
-    st.header("Agent D — Movie Quiz")
-
-    # Show questions
-    for i, q in enumerate(st.session_state.quiz_data):
-        st.write(f"### Q{i+1}: {q['question']}")
-
-        options = ["A", "B", "C", "D"]
-        full_options = [
-            f"{label}) {text}" for label, text in zip(options, q["choices"])
-        ]
-
-        selected = st.radio(
-            f"Select an answer for Q{i+1}",
-            options=options,
-            key=f"q{i+1}",
+        st.session_state.quiz_answers[question_key] = st.radio(
+            "Choose an answer:",
+            ["A", "B", "C", "D"],
+            key=question_key,
+            index=None
         )
 
-        st.session_state.user_answers[i] = selected
-
-    # Submit button
+    # ---------------------------------------------------------
+    # SHOW RESULTS BUTTON
+    # ---------------------------------------------------------
     if st.button("Submit Answers"):
-        st.session_state.show_results = True
-
-    # Show results
-    if st.session_state.show_results:
         st.subheader("📊 Results")
 
-        score = 0
-        for i, q in enumerate(st.session_state.quiz_data):
-            user = st.session_state.user_answers.get(i)
-            correct = q["answer"]
+        correct = 0
+        for idx, q in enumerate(st.session_state.quiz_data["questions"]):
+            key = f"question_{idx}"
+            user_ans = st.session_state.quiz_answers.get(key)
+            correct_ans = q["answer"]
 
-            if user == correct:
-                score += 1
-                st.success(
-                    f"Q{i+1}: Correct! ({correct}) — {q['explanation']}"
-                )
+            if user_ans == correct_ans:
+                correct += 1
+                st.success(f"Q{idx+1}: Correct! {q['explanation']}")
             else:
-                st.error(
-                    f"Q{i+1}: Incorrect. You chose {user}. Correct answer: {correct}. "
-                    f"\nExplanation: {q['explanation']}"
-                )
+                st.error(f"Q{idx+1}: Incorrect. Correct answer: {correct_ans}. {q['explanation']}")
 
-        st.write(f"### ⭐ Final Score: {score} / {len(st.session_state.quiz_data)}")
+        st.info(f"**Final Score: {correct} / {len(st.session_state.quiz_data['questions'])}**")
+
