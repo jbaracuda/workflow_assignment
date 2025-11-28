@@ -16,9 +16,7 @@ def llama_generate(prompt, max_tokens=200):
 
     payload = {
         "model": "meta-llama/llama-3-8b-instruct",
-        "messages": [
-            {"role": "user", "content": prompt}
-        ],
+        "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens
     }
 
@@ -28,13 +26,8 @@ def llama_generate(prompt, max_tokens=200):
         st.error(f"OpenRouter Error {response.status_code}: {response.text}")
         st.stop()
 
-    try:
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        st.error("Error reading response from OpenRouter.")
-        st.write(data)
-        st.stop()
+    data = response.json()
+    return data["choices"][0]["message"]["content"]
 
 
 # ======================================================
@@ -43,6 +36,13 @@ def llama_generate(prompt, max_tokens=200):
 def get_movie_data(title):
     url = f"http://www.omdbapi.com/?t={title}&apikey={st.secrets['OMDB_API_KEY']}&plot=full"
     return requests.get(url).json()
+
+
+# ======================================================
+# Title Normalization (RELIABLE)
+# ======================================================
+def normalize_title(title: str) -> str:
+    return title.title().strip()
 
 
 # ======================================================
@@ -60,10 +60,7 @@ if st.button("Run Workflow") and movie_title.strip():
     # --------------------------------------------------
     st.markdown("## 🧩 Agent A — Normalize Title")
 
-    normalized = llama_generate(
-        f"Return ONLY the properly capitalized official movie title for: {movie_title}",
-        max_tokens=30
-    ).strip()
+    normalized = normalize_title(movie_title)
 
     st.success(f"Normalized Title: **{normalized}**")
 
